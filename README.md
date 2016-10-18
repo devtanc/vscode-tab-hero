@@ -10,7 +10,7 @@ Tab Hero allows users to save a set of tabs, then restore that set of tabs later
 
 ## Release Notes
 
-Users appreciate release notes as you update your extension.
+Beta
 
 ## Known Issues
 
