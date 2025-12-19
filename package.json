@@ -42,7 +42,32 @@
         }, {
             "command": "extension.listFavorites",
             "title": "Tab Hero: Open Favorites"
-        }]
+        }],
+        "configuration": {
+            "title": "Tab Hero",
+            "properties": {
+                "tabHero.enableGitBranchScoping": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable git branch-specific tab sets. When enabled, you can choose whether to save tabs for the current branch or the entire project."
+                },
+                "tabHero.enableFileSelection": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable individual file selection when saving tab sets. When disabled, all open tabs are saved automatically."
+                },
+                "tabHero.enableNaming": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable custom naming for tab sets. When disabled, tab sets are automatically named based on branch or timestamp."
+                },
+                "tabHero.enableFavorites": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Enable favorites feature for marking and quickly accessing frequently used tab sets."
+                }
+            }
+        }
     },
     "scripts": {
         "postinstall": "node ./node_modules/vscode/bin/install"

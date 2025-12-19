@@ -62,13 +62,14 @@ class TabStorage {
     /**
      * Save a new tab set
      */
-    saveTabSet(name, tabs, branch = null, isFavorite = false) {
+    saveTabSet(name, tabs, branch = null, isFavorite = false, scope = 'project') {
         const data = this.readData();
 
         const tabSet = {
             id: Date.now().toString(),
             name: name,
             branch: branch,
+            scope: scope, // 'branch' or 'project'
             tabs: tabs.map(tab => ({
                 uri: tab.uri.toString(),
                 fileName: tab.fileName,
@@ -192,6 +193,38 @@ class TabStorage {
         // Sort by updatedAt descending
         sets.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
         return sets[0];
+    }
+
+    /**
+     * Get tab sets filtered by scope and current branch
+     */
+    getTabSetsByScope(currentBranch = null) {
+        const data = this.readData();
+        const allSets = data.tabSets || [];
+
+        return allSets.filter(set => {
+            // Project-scoped sets are always visible
+            if (set.scope === 'project') {
+                return true;
+            }
+
+            // Branch-scoped sets are only visible on matching branch
+            if (set.scope === 'branch' && currentBranch) {
+                return set.branch === currentBranch;
+            }
+
+            // Legacy sets without scope field (treat as branch-scoped if they have a branch)
+            if (!set.scope && set.branch && currentBranch) {
+                return set.branch === currentBranch;
+            }
+
+            // Legacy sets without scope or branch (treat as project-scoped)
+            if (!set.scope && !set.branch) {
+                return true;
+            }
+
+            return false;
+        });
     }
 }
 
