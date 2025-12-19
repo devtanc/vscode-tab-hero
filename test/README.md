@@ -6,13 +6,30 @@ This directory contains comprehensive unit and integration tests for Tab Hero.
 
 ### Quick Start (No Installation Required)
 ```bash
+# Console output (default)
 node test/run-tests.js
+
+# JUnit XML output (for CI/CD)
+node test/run-tests.js --format=junit
 ```
 
 ### With Mocha (After npm install)
 ```bash
 npm test
 ```
+
+### Output Formats
+
+**Console Format** (default): Human-readable output with colored indicators
+- Displays test progress in real-time
+- Shows detailed failure messages
+- Perfect for local development
+
+**JUnit XML Format**: Machine-readable format for CI/CD integration
+- Generates `test-results/junit.xml`
+- Compatible with GitHub Actions and other CI systems
+- Includes test timing and failure details
+- Use with `--format=junit` flag
 
 ## Test Coverage
 
