@@ -6,6 +6,8 @@ Tab Hero allows you to save and restore sets of open tabs in VS Code and Cursor.
 
 ### Save & Restore Tab Sets
 - **Save your current tabs** with custom names
+- **Multi-select UI** - choose exactly which tabs to include when saving (all selected by default)
+- **Auto-close saved tabs** - tabs are automatically closed after saving to keep your workspace clean
 - **Restore tab sets** from a searchable list
 - **Persistent storage** - tab sets survive VS Code restarts
 - **Git branch awareness** - automatically associates tab sets with your current branch
@@ -41,12 +43,15 @@ Access all commands via Command Palette (`Cmd+Shift+P` or `Ctrl+Shift+P`):
 
 ### Scenario 1: Working with Git Branches
 ```
-1. Working on feature branch with specific files open
-2. Run "Tab Hero: Save Tab Set" - name it "Feature X work"
-3. Switch to main branch: `git checkout main`
-4. Run "Tab Hero: Restore Branch Tabs" - opens your last saved tabs for main
-5. Switch back: `git checkout feature-x`
-6. Run "Tab Hero: Restore Branch Tabs" - instantly restores Feature X files
+1. Working on feature branch with 10 files open
+2. Run "Tab Hero: Save Tab Set"
+3. Multi-select UI appears - uncheck any tabs you don't want to save
+4. Name it "Feature X work" and confirm
+5. Selected tabs are automatically closed
+6. Switch to main branch: `git checkout main`
+7. Run "Tab Hero: Restore Branch Tabs" - opens your last saved tabs for main
+8. Switch back: `git checkout feature-x`
+9. Run "Tab Hero: Restore Branch Tabs" - instantly restores Feature X files
 ```
 
 ### Scenario 2: Favorite Workflows
@@ -75,6 +80,8 @@ Complete rewrite with new features:
 - ✅ Persistent storage in `.vscode/tab-hero.json`
 - ✅ Git branch detection and association
 - ✅ Named tab sets with custom names
+- ✅ Multi-select UI for choosing which tabs to save
+- ✅ Auto-close saved tabs after saving
 - ✅ Favorites system
 - ✅ Rename and delete operations
 - ✅ Quick pick UI for browsing tab sets

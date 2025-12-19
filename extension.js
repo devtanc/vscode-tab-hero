@@ -52,6 +52,34 @@ function formatTabSetForQuickPick(tabSet) {
     };
 }
 
+/**
+ * Close tabs by their URIs
+ */
+async function closeTabsByUris(urisToClose) {
+    let closedCount = 0;
+    const uriStrings = urisToClose.map(uri => uri.toString());
+
+    // Iterate through all tab groups
+    for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+            if (tab.input instanceof vscode.TabInputText) {
+                const tabUriString = tab.input.uri.toString();
+
+                if (uriStrings.includes(tabUriString)) {
+                    try {
+                        await vscode.window.tabGroups.close(tab);
+                        closedCount++;
+                    } catch (error) {
+                        console.error(`Failed to close tab ${tabUriString}:`, error);
+                    }
+                }
+            }
+        }
+    }
+
+    return closedCount;
+}
+
 function activate(context) {
     console.log('Tab Hero is now active!');
 
@@ -80,6 +108,50 @@ function activate(context) {
             if (openTabs.length === 0) {
                 vscode.window.showWarningMessage('No tabs are currently open.');
                 return;
+            }
+
+            // Convert URIs to documents with metadata
+            const allTabsWithInfo = await Promise.all(
+                openTabs.map(async (uri) => {
+                    try {
+                        const doc = await vscode.workspace.openTextDocument(uri);
+                        const fileName = uri.fsPath.split(/[\\/]/).pop();
+                        const relativePath = vscode.workspace.asRelativePath(uri.fsPath);
+
+                        return {
+                            uri: uri,
+                            fileName: fileName,
+                            languageId: doc.languageId,
+                            relativePath: relativePath
+                        };
+                    } catch (error) {
+                        const fileName = uri.fsPath.split(/[\\/]/).pop();
+                        return {
+                            uri: uri,
+                            fileName: fileName,
+                            languageId: 'unknown',
+                            relativePath: vscode.workspace.asRelativePath(uri.fsPath)
+                        };
+                    }
+                })
+            );
+
+            // Show multi-select quick pick for tab selection
+            const tabPickItems = allTabsWithInfo.map(tab => ({
+                label: tab.fileName,
+                description: tab.relativePath !== tab.fileName ? tab.relativePath : '',
+                detail: `Language: ${tab.languageId}`,
+                picked: true, // All selected by default
+                tabInfo: tab
+            }));
+
+            const selectedItems = await vscode.window.showQuickPick(tabPickItems, {
+                canPickMany: true,
+                placeHolder: 'Select tabs to include in this set (all selected by default)'
+            });
+
+            if (!selectedItems || selectedItems.length === 0) {
+                return; // User cancelled or selected nothing
             }
 
             // Get current git branch
@@ -111,32 +183,18 @@ function activate(context) {
 
             const isFavorite = favoriteChoice === 'Yes';
 
-            // Convert URIs to documents for storage
-            const tabs = await Promise.all(
-                openTabs.map(async (uri) => {
-                    try {
-                        const doc = await vscode.workspace.openTextDocument(uri);
-                        return {
-                            uri: uri,
-                            fileName: uri.fsPath.split(/[\\/]/).pop(),
-                            languageId: doc.languageId
-                        };
-                    } catch (error) {
-                        return {
-                            uri: uri,
-                            fileName: uri.fsPath.split(/[\\/]/).pop(),
-                            languageId: 'unknown'
-                        };
-                    }
-                })
-            );
+            // Get the selected tabs
+            const tabs = selectedItems.map(item => item.tabInfo);
 
             // Save the tab set
             const tabSet = storage.saveTabSet(name, tabs, currentBranch, isFavorite);
 
+            // Close all tabs that were saved
+            const closedCount = await closeTabsByUris(tabs.map(t => t.uri));
+
             const branchInfo = currentBranch ? ` (branch: ${currentBranch})` : '';
             vscode.window.showInformationMessage(
-                `✓ Saved "${name}" with ${tabs.length} tab${tabs.length !== 1 ? 's' : ''}${branchInfo}`
+                `✓ Saved "${name}" with ${tabs.length} tab${tabs.length !== 1 ? 's' : ''}${branchInfo}. Closed ${closedCount} tab${closedCount !== 1 ? 's' : ''}.`
             );
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to save tab set: ${error.message}`);
