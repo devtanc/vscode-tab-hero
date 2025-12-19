@@ -39,15 +39,19 @@ function getWorkspacePath() {
  * Format a tab set for the quick pick menu
  */
 function formatTabSetForQuickPick(tabSet) {
-    const branchLabel = tabSet.branch ? ` [${tabSet.branch}]` : '';
-    const favoriteLabel = tabSet.isFavorite ? ' ⭐' : '';
+    const favoriteLabel = tabSet.isFavorite ? '⭐ ' : '';
+    const scopeLabel = tabSet.scope === 'branch' && tabSet.branch
+        ? `$(git-branch) ${tabSet.branch}`
+        : tabSet.scope === 'project' || !tabSet.scope
+        ? '$(folder) Project'
+        : '';
     const tabCount = tabSet.tabs.length;
     const date = new Date(tabSet.updatedAt).toLocaleString();
 
     return {
-        label: `${tabSet.name}${favoriteLabel}${branchLabel}`,
-        description: `${tabCount} tab${tabCount !== 1 ? 's' : ''} • ${date}`,
-        detail: tabSet.tabs.map(t => t.fileName).join(', '),
+        label: `${favoriteLabel}${tabSet.name}`,
+        description: `${scopeLabel} • ${tabCount} tab${tabCount !== 1 ? 's' : ''}`,
+        detail: `Last modified: ${date} • Files: ${tabSet.tabs.map(t => t.fileName).join(', ')}`,
         tabSet: tabSet
     };
 }
@@ -102,12 +106,52 @@ function activate(context) {
         }
 
         try {
+            // Get configuration settings
+            const config = vscode.workspace.getConfiguration('tabHero');
+            const enableGitBranchScoping = config.get('enableGitBranchScoping', true);
+            const enableFileSelection = config.get('enableFileSelection', true);
+            const enableNaming = config.get('enableNaming', true);
+            const enableFavorites = config.get('enableFavorites', true);
+
             // Get open tabs
             const openTabs = getOpenTabs();
 
             if (openTabs.length === 0) {
                 vscode.window.showWarningMessage('No tabs are currently open.');
                 return;
+            }
+
+            // Get current git branch
+            const currentBranch = await gitHelper.getCurrentBranch(workspacePath);
+
+            // Step 1: Ask for scope (branch or project) if git branch scoping is enabled
+            let scope = 'project';
+            if (enableGitBranchScoping && currentBranch) {
+                const scopeChoice = await vscode.window.showQuickPick(
+                    [
+                        {
+                            label: '$(git-branch) Current Branch',
+                            description: `Save for "${currentBranch}" branch only`,
+                            detail: 'These tabs will only appear when you\'re on this branch',
+                            value: 'branch'
+                        },
+                        {
+                            label: '$(folder) Entire Project',
+                            description: 'Save for all branches',
+                            detail: 'These tabs will be available regardless of the current branch',
+                            value: 'project'
+                        }
+                    ],
+                    {
+                        placeHolder: 'Where should this tab set be available?'
+                    }
+                );
+
+                if (!scopeChoice) {
+                    return; // User cancelled
+                }
+
+                scope = scopeChoice.value;
             }
 
             // Convert URIs to documents with metadata
@@ -136,65 +180,95 @@ function activate(context) {
                 })
             );
 
-            // Show multi-select quick pick for tab selection
-            const tabPickItems = allTabsWithInfo.map(tab => ({
-                label: tab.fileName,
-                description: tab.relativePath !== tab.fileName ? tab.relativePath : '',
-                detail: `Language: ${tab.languageId}`,
-                picked: true, // All selected by default
-                tabInfo: tab
-            }));
+            // Step 2: File selection (if enabled)
+            let selectedItems = allTabsWithInfo;
+            if (enableFileSelection) {
+                const tabPickItems = allTabsWithInfo.map(tab => ({
+                    label: tab.fileName,
+                    description: tab.relativePath !== tab.fileName ? tab.relativePath : '',
+                    detail: `Language: ${tab.languageId}`,
+                    picked: true, // All selected by default
+                    tabInfo: tab
+                }));
 
-            const selectedItems = await vscode.window.showQuickPick(tabPickItems, {
-                canPickMany: true,
-                placeHolder: 'Select tabs to include in this set (all selected by default)'
-            });
+                const picked = await vscode.window.showQuickPick(tabPickItems, {
+                    canPickMany: true,
+                    placeHolder: `Select the tabs to include in this set (${openTabs.length} tabs open, all selected by default)`
+                });
 
-            if (!selectedItems || selectedItems.length === 0) {
-                return; // User cancelled or selected nothing
-            }
-
-            // Get current git branch
-            const currentBranch = await gitHelper.getCurrentBranch(workspacePath);
-
-            // Ask user for a name
-            const defaultName = currentBranch ? `${currentBranch} tabs` : 'Unnamed tab set';
-            const name = await vscode.window.showInputBox({
-                prompt: 'Enter a name for this tab set',
-                placeHolder: defaultName,
-                value: defaultName
-            });
-
-            if (!name) {
-                return; // User cancelled
-            }
-
-            // Ask if this should be a favorite
-            const favoriteChoice = await vscode.window.showQuickPick(
-                ['No', 'Yes'],
-                {
-                    placeHolder: 'Mark as favorite?'
+                if (!picked || picked.length === 0) {
+                    return; // User cancelled or selected nothing
                 }
-            );
 
-            if (favoriteChoice === undefined) {
-                return; // User cancelled
+                selectedItems = picked.map(item => item.tabInfo);
             }
 
-            const isFavorite = favoriteChoice === 'Yes';
+            // Step 3: Ask user for a name (if enabled)
+            let name;
+            if (enableNaming) {
+                const scopeLabel = scope === 'branch' ? currentBranch : 'project';
+                const defaultName = currentBranch && scope === 'branch'
+                    ? `${currentBranch} tabs`
+                    : `Tab set ${new Date().toLocaleDateString()}`;
+
+                name = await vscode.window.showInputBox({
+                    prompt: 'Give your tab set a name',
+                    placeHolder: defaultName,
+                    value: defaultName,
+                    validateInput: (value) => {
+                        return value && value.trim() ? null : 'Name cannot be empty';
+                    }
+                });
+
+                if (!name) {
+                    return; // User cancelled
+                }
+            } else {
+                // Auto-generate name
+                name = currentBranch && scope === 'branch'
+                    ? `${currentBranch} tabs`
+                    : `Tab set ${new Date().toLocaleString()}`;
+            }
+
+            // Step 4: Ask if this should be a favorite (if enabled)
+            let isFavorite = false;
+            if (enableFavorites) {
+                const favoriteChoice = await vscode.window.showQuickPick(
+                    [
+                        {
+                            label: 'No',
+                            description: 'Regular tab set'
+                        },
+                        {
+                            label: 'Yes',
+                            description: 'Quick access from favorites list'
+                        }
+                    ],
+                    {
+                        placeHolder: 'Add to favorites for quick access?'
+                    }
+                );
+
+                if (favoriteChoice === undefined) {
+                    return; // User cancelled
+                }
+
+                isFavorite = favoriteChoice.label === 'Yes';
+            }
 
             // Get the selected tabs
-            const tabs = selectedItems.map(item => item.tabInfo);
+            const tabs = selectedItems;
 
             // Save the tab set
-            const tabSet = storage.saveTabSet(name, tabs, currentBranch, isFavorite);
+            const tabSet = storage.saveTabSet(name, tabs, currentBranch, isFavorite, scope);
 
             // Close all tabs that were saved
             const closedCount = await closeTabsByUris(tabs.map(t => t.uri));
 
-            const branchInfo = currentBranch ? ` (branch: ${currentBranch})` : '';
+            const scopeInfo = scope === 'branch' && currentBranch ? ` (${currentBranch} branch)` : ' (project-wide)';
+            const favoriteInfo = isFavorite ? ' ⭐' : '';
             vscode.window.showInformationMessage(
-                `✓ Saved "${name}" with ${tabs.length} tab${tabs.length !== 1 ? 's' : ''}${branchInfo}. Closed ${closedCount} tab${closedCount !== 1 ? 's' : ''}.`
+                `✓ Saved "${name}"${favoriteInfo} with ${tabs.length} tab${tabs.length !== 1 ? 's' : ''}${scopeInfo}. Closed ${closedCount} tab${closedCount !== 1 ? 's' : ''}.`
             );
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to save tab set: ${error.message}`);
@@ -210,10 +284,66 @@ function activate(context) {
         }
 
         try {
-            const allTabSets = storage.getAllTabSets();
+            // Get configuration settings
+            const config = vscode.workspace.getConfiguration('tabHero');
+            const enableGitBranchScoping = config.get('enableGitBranchScoping', true);
+
+            // Get current git branch
+            const currentBranch = await gitHelper.getCurrentBranch(workspacePath);
+
+            // Step 1: Ask for scope (branch or project) if git branch scoping is enabled and in a git repo
+            let scopeFilter = null; // null means show all
+            if (enableGitBranchScoping && currentBranch) {
+                const scopeChoice = await vscode.window.showQuickPick(
+                    [
+                        {
+                            label: '$(git-branch) Current Branch',
+                            description: `Show tab sets for "${currentBranch}" branch`,
+                            detail: 'Only show tab sets saved for this branch',
+                            value: 'branch'
+                        },
+                        {
+                            label: '$(folder) Entire Project',
+                            description: 'Show project-wide tab sets',
+                            detail: 'Only show tab sets available across all branches',
+                            value: 'project'
+                        },
+                        {
+                            label: '$(list-unordered) All Tab Sets',
+                            description: 'Show everything',
+                            detail: 'Show all tab sets regardless of scope',
+                            value: 'all'
+                        }
+                    ],
+                    {
+                        placeHolder: 'Which tab sets would you like to see?'
+                    }
+                );
+
+                if (!scopeChoice) {
+                    return; // User cancelled
+                }
+
+                scopeFilter = scopeChoice.value;
+            }
+
+            // Get tab sets based on scope filter
+            let allTabSets;
+            if (scopeFilter === 'all') {
+                allTabSets = storage.getAllTabSets();
+            } else if (scopeFilter === 'branch') {
+                allTabSets = storage.getTabSetsByScope(currentBranch).filter(set => set.scope === 'branch');
+            } else if (scopeFilter === 'project') {
+                allTabSets = storage.getAllTabSets().filter(set => set.scope === 'project' || !set.scope);
+            } else {
+                // No scope filter (git not enabled or not in git repo)
+                allTabSets = storage.getTabSetsByScope(currentBranch);
+            }
 
             if (allTabSets.length === 0) {
-                vscode.window.showInformationMessage('No saved tab sets found. Save one first!');
+                const scopeMsg = scopeFilter === 'branch' ? ' for this branch' :
+                               scopeFilter === 'project' ? ' for the project' : '';
+                vscode.window.showInformationMessage(`No saved tab sets found${scopeMsg}. Save one first!`);
                 return;
             }
 
@@ -227,7 +357,7 @@ function activate(context) {
             // Show quick pick
             const items = allTabSets.map(formatTabSetForQuickPick);
             const selected = await vscode.window.showQuickPick(items, {
-                placeHolder: 'Select a tab set to restore'
+                placeHolder: `Select a tab set to open (${allTabSets.length} available)`
             });
 
             if (!selected) {
@@ -251,7 +381,7 @@ function activate(context) {
                 }
             }
 
-            const message = `Opened ${openedCount} tab${openedCount !== 1 ? 's' : ''}` +
+            const message = `Opened ${openedCount} tab${openedCount !== 1 ? 's' : ''} from "${tabSet.name}"` +
                 (failedCount > 0 ? ` (${failedCount} failed)` : '');
             vscode.window.showInformationMessage(message);
         } catch (error) {
@@ -271,14 +401,14 @@ function activate(context) {
             const currentBranch = await gitHelper.getCurrentBranch(workspacePath);
 
             if (!currentBranch) {
-                vscode.window.showWarningMessage('Not a git repository or unable to detect branch.');
+                vscode.window.showWarningMessage('This is not a git repository or unable to detect the current branch.');
                 return;
             }
 
             const tabSet = storage.getLatestTabSetForBranch(currentBranch);
 
             if (!tabSet) {
-                vscode.window.showInformationMessage(`No saved tab sets found for branch "${currentBranch}".`);
+                vscode.window.showInformationMessage(`No saved tab sets found for branch "${currentBranch}". Save some tabs first!`);
                 return;
             }
 
@@ -298,8 +428,8 @@ function activate(context) {
                 }
             }
 
-            const message = `Restored "${tabSet.name}" with ${openedCount} tab${openedCount !== 1 ? 's' : ''}` +
-                (failedCount > 0 ? ` (${failedCount} failed)` : '');
+            const message = `✓ Opened "${tabSet.name}" with ${openedCount} tab${openedCount !== 1 ? 's' : ''}` +
+                (failedCount > 0 ? ` (${failedCount} couldn't be opened)` : '');
             vscode.window.showInformationMessage(message);
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to restore branch tabs: ${error.message}`);
@@ -312,7 +442,7 @@ function activate(context) {
             const allTabSets = storage.getAllTabSets();
 
             if (allTabSets.length === 0) {
-                vscode.window.showInformationMessage('No saved tab sets found.');
+                vscode.window.showInformationMessage('No saved tab sets found. Create one first by saving your open tabs!');
                 return;
             }
 
@@ -322,7 +452,7 @@ function activate(context) {
             // Show quick pick
             const items = allTabSets.map(formatTabSetForQuickPick);
             const selected = await vscode.window.showQuickPick(items, {
-                placeHolder: 'Select a tab set to rename'
+                placeHolder: `Which tab set would you like to rename? (${allTabSets.length} available)`
             });
 
             if (!selected) {
@@ -330,9 +460,12 @@ function activate(context) {
             }
 
             const newName = await vscode.window.showInputBox({
-                prompt: 'Enter new name',
+                prompt: `Enter a new name for "${selected.tabSet.name}"`,
                 placeHolder: 'New tab set name',
-                value: selected.tabSet.name
+                value: selected.tabSet.name,
+                validateInput: (value) => {
+                    return value && value.trim() ? null : 'Name cannot be empty';
+                }
             });
 
             if (!newName) {
@@ -342,9 +475,9 @@ function activate(context) {
             const success = storage.renameTabSet(selected.tabSet.id, newName);
 
             if (success) {
-                vscode.window.showInformationMessage(`Renamed to "${newName}"`);
+                vscode.window.showInformationMessage(`✓ Renamed to "${newName}"`);
             } else {
-                vscode.window.showErrorMessage('Failed to rename tab set');
+                vscode.window.showErrorMessage('Failed to rename tab set. Please try again.');
             }
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to rename tab set: ${error.message}`);
@@ -357,7 +490,7 @@ function activate(context) {
             const allTabSets = storage.getAllTabSets();
 
             if (allTabSets.length === 0) {
-                vscode.window.showInformationMessage('No saved tab sets found.');
+                vscode.window.showInformationMessage('No saved tab sets found. Nothing to delete!');
                 return;
             }
 
@@ -367,7 +500,7 @@ function activate(context) {
             // Show quick pick
             const items = allTabSets.map(formatTabSetForQuickPick);
             const selected = await vscode.window.showQuickPick(items, {
-                placeHolder: 'Select a tab set to delete'
+                placeHolder: `Which tab set would you like to delete? (${allTabSets.length} available)`
             });
 
             if (!selected) {
@@ -376,9 +509,10 @@ function activate(context) {
 
             // Confirm deletion
             const confirm = await vscode.window.showWarningMessage(
-                `Delete "${selected.tabSet.name}"?`,
+                `Are you sure you want to delete "${selected.tabSet.name}"? This cannot be undone.`,
                 { modal: true },
-                'Delete'
+                'Delete',
+                'Cancel'
             );
 
             if (confirm !== 'Delete') {
@@ -388,9 +522,9 @@ function activate(context) {
             const success = storage.deleteTabSet(selected.tabSet.id);
 
             if (success) {
-                vscode.window.showInformationMessage(`Deleted "${selected.tabSet.name}"`);
+                vscode.window.showInformationMessage(`✓ Deleted "${selected.tabSet.name}"`);
             } else {
-                vscode.window.showErrorMessage('Failed to delete tab set');
+                vscode.window.showErrorMessage('Failed to delete tab set. Please try again.');
             }
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to delete tab set: ${error.message}`);
@@ -403,7 +537,7 @@ function activate(context) {
             const allTabSets = storage.getAllTabSets();
 
             if (allTabSets.length === 0) {
-                vscode.window.showInformationMessage('No saved tab sets found.');
+                vscode.window.showInformationMessage('No saved tab sets found. Create one first by saving your open tabs!');
                 return;
             }
 
@@ -413,7 +547,7 @@ function activate(context) {
             // Show quick pick
             const items = allTabSets.map(formatTabSetForQuickPick);
             const selected = await vscode.window.showQuickPick(items, {
-                placeHolder: 'Select a tab set to toggle favorite'
+                placeHolder: `Which tab set would you like to mark as favorite? (${allTabSets.length} available)`
             });
 
             if (!selected) {
@@ -423,7 +557,7 @@ function activate(context) {
             const isFavorite = storage.toggleFavorite(selected.tabSet.id);
 
             const message = isFavorite
-                ? `⭐ Added "${selected.tabSet.name}" to favorites`
+                ? `⭐ Added "${selected.tabSet.name}" to favorites for quick access`
                 : `Removed "${selected.tabSet.name}" from favorites`;
 
             vscode.window.showInformationMessage(message);
@@ -438,7 +572,7 @@ function activate(context) {
             const favorites = storage.getFavorites();
 
             if (favorites.length === 0) {
-                vscode.window.showInformationMessage('No favorite tab sets. Mark a tab set as favorite!');
+                vscode.window.showInformationMessage('No favorite tab sets yet. Mark a tab set as favorite for quick access!');
                 return;
             }
 
@@ -448,7 +582,7 @@ function activate(context) {
             // Show quick pick
             const items = favorites.map(formatTabSetForQuickPick);
             const selected = await vscode.window.showQuickPick(items, {
-                placeHolder: 'Select a favorite tab set to restore'
+                placeHolder: `⭐ Select a favorite to open (${favorites.length} favorites)`
             });
 
             if (!selected) {
@@ -472,7 +606,7 @@ function activate(context) {
                 }
             }
 
-            const message = `Opened ${openedCount} tab${openedCount !== 1 ? 's' : ''}` +
+            const message = `Opened ${openedCount} tab${openedCount !== 1 ? 's' : ''} from "${tabSet.name}"` +
                 (failedCount > 0 ? ` (${failedCount} failed)` : '');
             vscode.window.showInformationMessage(message);
         } catch (error) {
