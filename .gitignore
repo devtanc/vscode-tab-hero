@@ -1,1 +1,4 @@
 node_modules
+
+# Uncomment the following line if you want to keep tab sets personal
+# .vscode/tab-hero.json

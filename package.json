@@ -1,8 +1,8 @@
 {
     "name": "tab-hero",
     "displayName": "Tab Hero",
-    "description": "A tab saving extension for VS Code",
-    "version": "0.0.1",
+    "description": "Save and restore tab sets with git branch awareness and favorites",
+    "version": "1.0.0",
     "publisher": "devtanc",
     "engines": {
         "vscode": "^1.5.0"
@@ -23,10 +23,25 @@
     "contributes": {
         "commands": [{
             "command": "extension.saveTabSet",
-            "title": "Save Tab Set"
+            "title": "Tab Hero: Save Tab Set"
         }, {
             "command": "extension.openTabSet",
-            "title": "Open Tab Set"
+            "title": "Tab Hero: Open Tab Set"
+        }, {
+            "command": "extension.restoreBranchTabs",
+            "title": "Tab Hero: Restore Branch Tabs"
+        }, {
+            "command": "extension.renameTabSet",
+            "title": "Tab Hero: Rename Tab Set"
+        }, {
+            "command": "extension.deleteTabSet",
+            "title": "Tab Hero: Delete Tab Set"
+        }, {
+            "command": "extension.toggleFavorite",
+            "title": "Tab Hero: Toggle Favorite"
+        }, {
+            "command": "extension.listFavorites",
+            "title": "Tab Hero: Open Favorites"
         }]
     },
     "scripts": {
